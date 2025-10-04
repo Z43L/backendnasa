@@ -247,7 +247,86 @@ def run_seismic_inference(args):
     logger.info("Iniciando servidor de inferencia sísmica...")
     try:
         import uvicorn
-        from inference.api_server import app
+        from fastapi import FastAPI, HTTPException
+        from pydantic import BaseModel
+        import numpy as np
+        from inference_service import inference_service, get_seismic_prediction
+
+        app = FastAPI(title="Seismic AI Inference API", version="1.0.0")
+
+        class SeismicData(BaseModel):
+            data: list  # Seismic data as nested list
+            shape: Optional[list] = None  # Optional shape specification
+
+        @app.get("/")
+        async def root():
+            return {"message": "Seismic AI Inference API", "status": "running"}
+
+        @app.get("/health")
+        async def health():
+            model_status = inference_service.get_model_status()
+            device_info = inference_service.get_device_info()
+            return {
+                "status": "healthy",
+                "models": model_status,
+                "device": device_info
+            }
+
+        @app.post("/predict/seismic")
+        async def predict_seismic(seismic_input: SeismicData):
+            try:
+                # Convert input data to numpy array
+                data = np.array(seismic_input.data)
+
+                # Reshape if shape is provided
+                if seismic_input.shape:
+                    data = data.reshape(seismic_input.shape)
+
+                # Run prediction
+                result = get_seismic_prediction(data)
+                return result
+
+            except Exception as e:
+                logger.error(f"Error in seismic prediction: {e}")
+                raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+        @app.post("/predict/weather")
+        async def predict_weather(weather_input: SeismicData):
+            try:
+                # Convert input data to numpy array
+                data = np.array(weather_input.data)
+
+                # Reshape if shape is provided
+                if weather_input.shape:
+                    data = data.reshape(weather_input.shape)
+
+                # Run prediction
+                from inference_service import get_weather_prediction
+                result = get_weather_prediction(data)
+                return result
+
+            except Exception as e:
+                logger.error(f"Error in weather prediction: {e}")
+                raise HTTPException(status_code=500, detail=f"Weather prediction failed: {str(e)}")
+
+        @app.post("/predict/dsa")
+        async def predict_dsa(dsa_input: SeismicData):
+            try:
+                # Convert input data to numpy array
+                data = np.array(dsa_input.data)
+
+                # Reshape if shape is provided
+                if dsa_input.shape:
+                    data = data.reshape(dsa_input.shape)
+
+                # Run prediction
+                from inference_service import get_dsa_prediction
+                result = get_dsa_prediction(data)
+                return result
+
+            except Exception as e:
+                logger.error(f"Error in DSA prediction: {e}")
+                raise HTTPException(status_code=500, detail=f"DSA prediction failed: {str(e)}")
 
         host = args.host or "0.0.0.0"
         port = args.port or 8000
