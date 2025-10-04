@@ -114,10 +114,15 @@ class SpatialTemporalTransformer(nn.Module):
 
         # Aplanar espacialmente cada fotograma: [batch, seq_len, num_patches]
         num_patches = height * width
-        x_flat = x.view(batch_size, seq_len, num_patches, 1)  # Añadir dimensión para el escalar
+        x_flat = x.view(batch_size, seq_len, num_patches)  # [batch, seq_len, num_patches]
 
         # Embedding lineal para convertir a d_model
-        x_embed = self.spatial_embedding(x_flat)  # [batch, seq_len, num_patches, d_model]
+        # Reorganizar para aplicar Linear: [batch * seq_len * num_patches, 1]
+        x_flat_reshaped = x_flat.view(-1, 1)  # [batch * seq_len * num_patches, 1]
+        x_embed_flat = self.spatial_embedding(x_flat_reshaped)  # [batch * seq_len * num_patches, d_model]
+
+        # Reorganizar de vuelta: [batch, seq_len, num_patches, d_model]
+        x_embed = x_embed_flat.view(batch_size, seq_len, num_patches, self.d_model)
 
         # Reorganizar para encoder espacial: tratar cada patch como token
         # [batch, seq_len, num_patches, d_model] -> [batch * seq_len, num_patches, d_model]
