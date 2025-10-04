@@ -158,7 +158,7 @@ class DeformationDataset(Dataset):
         return sequence, label
 
 def create_data_loaders(h5_file: str, task_type: str, batch_size: int = 8,
-                       train_split: float = 0.8, num_workers: int = 0, chunk_size: int = 1000) -> Tuple[DataLoader, DataLoader]:
+                       train_split: float = 0.8, num_workers: int = 4, chunk_size: int = 1000) -> Tuple[DataLoader, DataLoader]:
     """
     Crea DataLoaders para entrenamiento y validación con carga segmentada.
 
@@ -196,15 +196,19 @@ class ModelTrainer:
     Clase para entrenar modelos de predicción de deformación.
     """
 
-    def __init__(self, model: nn.Module, device: str = 'auto'):
+    def __init__(self, model: nn.Module, device: str = 'auto', use_mixed_precision: bool = False, gradient_accumulation_steps: int = 1):
         """
         Inicializa el entrenador.
 
         Args:
             model: Modelo a entrenar
             device: Dispositivo ('auto', 'cpu', 'cuda')
+            use_mixed_precision: Usar mixed precision training
+            gradient_accumulation_steps: Número de pasos para acumular gradientes
         """
         self.model = model
+        self.use_mixed_precision = use_mixed_precision
+        self.gradient_accumulation_steps = gradient_accumulation_steps
 
         # Configurar dispositivo
         if device == 'auto':
@@ -213,6 +217,16 @@ class ModelTrainer:
             self.device = torch.device(device)
 
         self.model.to(self.device)
+
+        # Configurar AMP si está disponible y solicitado
+        self.scaler = None
+        if self.use_mixed_precision and self.device.type == 'cuda':
+            try:
+                from torch.cuda.amp import GradScaler
+                self.scaler = GradScaler()
+            except ImportError:
+                print("Mixed precision no disponible, usando precisión completa")
+                self.use_mixed_precision = False
 
         # Configurar loss y optimizer basado en el tipo de tarea
         if model.task_type == 'regression':
@@ -251,17 +265,38 @@ class ModelTrainer:
         num_batches = len(train_loader)
 
         progress_bar = tqdm(train_loader, desc="Training")
+        accumulation_step = 0
+        
         for sequences, labels in progress_bar:
             sequences, labels = sequences.to(self.device), labels.to(self.device)
 
-            # Forward pass
-            self.optimizer.zero_grad()
-            outputs = self.model(sequences)
+            # Forward pass con mixed precision si está disponible
+            if self.use_mixed_precision and self.scaler is not None:
+                with torch.cuda.amp.autocast():
+                    outputs = self.model(sequences)
+                    loss = self.criterion(outputs, labels) / self.gradient_accumulation_steps
+            else:
+                # Forward pass normal
+                outputs = self.model(sequences)
+                loss = self.criterion(outputs, labels) / self.gradient_accumulation_steps
 
-            # Calcular loss
-            loss = self.criterion(outputs, labels)
-            loss.backward()
-            self.optimizer.step()
+            # Backward pass
+            if self.use_mixed_precision and self.scaler is not None:
+                self.scaler.scale(loss).backward()
+            else:
+                loss.backward()
+
+            accumulation_step += 1
+            
+            # Actualizar pesos cada gradient_accumulation_steps
+            if accumulation_step % self.gradient_accumulation_steps == 0:
+                if self.use_mixed_precision and self.scaler is not None:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
+                self.optimizer.zero_grad()
+                accumulation_step = 0
 
             # Calcular métrica
             if self.model.task_type == 'regression':

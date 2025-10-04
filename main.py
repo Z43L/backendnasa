@@ -1,7 +1,30 @@
 #!/usr/bin/env python3
 """
-Backend unificado para el sistema de IA de monitoreo sísmico.
-Punto de entrada principal que coordina todos los componentes.
+Backend unificado para el sistema de IA de monitore        # Determinar la ruta base del proyecto de forma más robusta
+        current_dir = Path.cwd()
+        
+        # Buscar el directorio datasets en múltiples ubicaciones posibles
+        possible_dataset_dirs = [
+            current_dir / "datasets",  # Desde backend/ (caso local)
+            current_dir.parent / "datasets",  # Desde backend/ hacia arriba (caso contenedor)
+            Path("/workspace") / "datasets",  # Ruta absoluta en contenedor
+            Path("/workspace/backendnasa") / "datasets",  # Ruta alternativa en contenedor
+        ]
+        
+        dataset_dir = None
+        for possible_dir in possible_dataset_dirs:
+            if possible_dir.exists():
+                dataset_dir = possible_dir
+                print(f"Usando directorio de datasets: {dataset_dir}")
+                break
+        
+        if dataset_dir is None:
+            # Listar directorios disponibles para debug
+            print("Directorios disponibles:")
+            for possible_dir in possible_dataset_dirs:
+                exists = "EXISTS" if possible_dir.exists() else "NOT FOUND"
+                print(f"  {possible_dir}: {exists}")
+            raise FileNotFoundError("No se encontró el directorio 'datasets' en ninguna ubicación esperada")e entrada principal que coordina todos los componentes.
 """
 
 import os
@@ -95,8 +118,11 @@ def run_model_training(args):
         if dataset_dir is None:
             raise FileNotFoundError("No se encontró el directorio 'datasets' en ninguna ubicación esperada")
         
-        # Configurar dispositivo
-        device = 'cpu' if getattr(args, 'use_cpu', False) else 'auto'
+        # Configurar dispositivo - usar GPU por defecto si está disponible
+        if getattr(args, 'use_cpu', False):
+            device = 'cpu'
+        else:
+            device = 'auto'  # Dejará que PyTorch elija GPU si está disponible
         
         # Configurar archivo de datos basado en el área y tarea
         if args.task == 'classification':
@@ -110,11 +136,12 @@ def run_model_training(args):
                     num_epochs=args.epochs,
                     batch_size=args.batch_size,
                     chunk_size=args.chunk_size,
-                    device=device
+                    device=device,
+                    use_mixed_precision=getattr(args, 'mixed_precision', False)
                 )
             except TypeError as e:
-                if 'device' in str(e):
-                    # La función no soporta device, intentar sin él
+                if 'device' in str(e) or 'use_mixed_precision' in str(e):
+                    # La función no soporta estos parámetros, intentar sin ellos
                     trainer = train_classification_model(
                         h5_file=str(h5_file),
                         save_dir=str(save_dir),
@@ -135,11 +162,12 @@ def run_model_training(args):
                     num_epochs=args.epochs,
                     batch_size=args.batch_size,
                     chunk_size=args.chunk_size,
-                    device=device
+                    device=device,
+                    use_mixed_precision=getattr(args, 'mixed_precision', False)
                 )
             except TypeError as e:
-                if 'device' in str(e):
-                    # La función no soporta device, intentar sin él
+                if 'device' in str(e) or 'use_mixed_precision' in str(e):
+                    # La función no soporta estos parámetros, intentar sin ellos
                     trainer = train_regression_model(
                         h5_file=str(h5_file),
                         save_dir=str(save_dir),
@@ -257,9 +285,11 @@ def main():
     train_parser.add_argument('--task', choices=['classification', 'regression'], default='classification')
     train_parser.add_argument('--area', default='falla_anatolia')
     train_parser.add_argument('--epochs', type=int, default=50)
-    train_parser.add_argument('--batch-size', type=int, default=2)  # Reducido de 8 a 2 para evitar OOM
+    train_parser.add_argument('--batch-size', type=int, default=2)  # Reducido para evitar OOM
     train_parser.add_argument('--chunk-size', type=int, default=1000)
     train_parser.add_argument('--use-cpu', action='store_true', help='Forzar uso de CPU en lugar de GPU')
+    train_parser.add_argument('--mixed-precision', action='store_true', help='Usar mixed precision training (más rápido en GPU moderna)')
+    train_parser.add_argument('--gradient-accumulation', type=int, default=1, help='Acumular gradientes para simular batch size mayor')
     train_parser.set_defaults(func=run_model_training)
 
     # Comando para inferencia sísmica
