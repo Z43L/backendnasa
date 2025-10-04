@@ -156,17 +156,12 @@ class SpatialTemporalTransformer(nn.Module):
         # Reorganizar: [batch, num_patches, d_model]
         temporal_features = last_timestep.view(batch_size, num_patches, self.d_model)
 
-        # Atención global simplificada: promedio ponderado de todos los patches
-        # Esto es más estable y eficiente que selección top-k compleja
+        # Atención global simplificada: promedio de todos los patches
+        # Esta es la aproximación más simple y robusta
+        global_features = temporal_features.mean(dim=1)  # [batch, d_model]
 
-        # Calcular pesos de importancia para cada patch
-        patch_weights = torch.softmax(torch.mean(temporal_features, dim=-1), dim=-1)  # [batch, num_patches]
-
-        # Atención global: promedio ponderado de todos los patches
-        sparse_out = torch.sum(temporal_features * patch_weights.unsqueeze(-1), dim=1, keepdim=True)  # [batch, 1, d_model]
-
-        # Expandir para mantener dimensionalidad consistente
-        sparse_out = sparse_out.expand(-1, num_patches, -1)  # [batch, num_patches, d_model]
+        # Expandir para mantener dimensionalidad consistente con el resto del código
+        sparse_out = global_features.unsqueeze(1).expand(-1, num_patches, -1)  # [batch, num_patches, d_model]
 
         # Cabeza de predicción
         if self.task_type == 'regression':
@@ -176,9 +171,8 @@ class SpatialTemporalTransformer(nn.Module):
             # Reorganizar a [batch, height, width]
             output = output.view(batch_size, height, width)
         elif self.task_type == 'classification':
-            # Promediar sobre todos los patches para clasificación global
-            pooled = sparse_out.mean(dim=1)  # [batch, d_model]
-            output = self.classification_head(pooled)  # [batch, num_classes]
+            # Usar representación global para clasificación
+            output = self.classification_head(global_features)  # [batch, num_classes]
 
         return output
 
@@ -188,7 +182,10 @@ class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
+        self.d_model = d_model
+        self.max_len = max_len
 
+        # Inicializar positional encodings básicos
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_len, 1, d_model)
@@ -199,13 +196,26 @@ class PositionalEncoding(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: Tensor [seq_len, batch_size, embedding_dim] o [batch_size, seq_len, embedding_dim]
+            x: Tensor [batch_size, seq_len, embedding_dim]
         """
-        if x.dim() == 3 and x.shape[0] != self.pe.shape[0]:
-            # Caso: [batch_size, seq_len, embedding_dim] -> [seq_len, batch_size, embedding_dim]
-            x = x.transpose(0, 1)
+        # Para este caso de uso, esperamos [batch_size, seq_len, embedding_dim]
+        # donde seq_len podría ser num_patches (2500) o seq_length (30)
+        batch_size, seq_len, d_model = x.shape
 
-        x = x + self.pe[:x.size(0)]
+        # Asegurarse de que tenemos positional encodings suficientes
+        if seq_len > self.pe.shape[0]:
+            # Extender positional encodings si es necesario
+            position = torch.arange(seq_len).unsqueeze(1).to(x.device)
+            div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)).to(x.device)
+            pe = torch.zeros(seq_len, 1, d_model).to(x.device)
+            pe[:, 0, 0::2] = torch.sin(position * div_term)
+            pe[:, 0, 1::2] = torch.cos(position * div_term)
+        else:
+            pe = self.pe[:seq_len]
+
+        # Aplicar positional encoding: [seq_len, 1, d_model] -> [1, seq_len, d_model] -> [batch_size, seq_len, d_model]
+        x = x + pe.squeeze(1).unsqueeze(0).expand(batch_size, -1, -1)
+
         return self.dropout(x)
 
 def create_model(task_type: str = 'regression', **kwargs) -> SpatialTemporalTransformer:
