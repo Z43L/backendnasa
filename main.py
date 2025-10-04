@@ -102,25 +102,53 @@ def run_model_training(args):
         if args.task == 'classification':
             h5_file = dataset_dir / f"{args.area}_synthetic_clasificacion.h5"
             save_dir = current_dir / f"checkpoints_{args.task}_{args.area}"
-            trainer = train_classification_model(
-                h5_file=str(h5_file),
-                save_dir=str(save_dir),
-                num_epochs=args.epochs,
-                batch_size=args.batch_size,
-                chunk_size=args.chunk_size,
-                device=device
-            )
+            # Intentar con device, si falla intentar sin device
+            try:
+                trainer = train_classification_model(
+                    h5_file=str(h5_file),
+                    save_dir=str(save_dir),
+                    num_epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    chunk_size=args.chunk_size,
+                    device=device
+                )
+            except TypeError as e:
+                if 'device' in str(e):
+                    # La función no soporta device, intentar sin él
+                    trainer = train_classification_model(
+                        h5_file=str(h5_file),
+                        save_dir=str(save_dir),
+                        num_epochs=args.epochs,
+                        batch_size=args.batch_size,
+                        chunk_size=args.chunk_size
+                    )
+                else:
+                    raise
         elif args.task == 'regression':
             h5_file = dataset_dir / f"{args.area}_synthetic_regresion.h5"
             save_dir = current_dir / f"checkpoints_{args.task}_{args.area}"
-            trainer = train_regression_model(
-                h5_file=str(h5_file),
-                save_dir=str(save_dir),
-                num_epochs=args.epochs,
-                batch_size=args.batch_size,
-                chunk_size=args.chunk_size,
-                device=device
-            )
+            # Intentar con device, si falla intentar sin device
+            try:
+                trainer = train_regression_model(
+                    h5_file=str(h5_file),
+                    save_dir=str(save_dir),
+                    num_epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    chunk_size=args.chunk_size,
+                    device=device
+                )
+            except TypeError as e:
+                if 'device' in str(e):
+                    # La función no soporta device, intentar sin él
+                    trainer = train_regression_model(
+                        h5_file=str(h5_file),
+                        save_dir=str(save_dir),
+                        num_epochs=args.epochs,
+                        batch_size=args.batch_size,
+                        chunk_size=args.chunk_size
+                    )
+                else:
+                    raise
 
         logger.info(f"Entrenamiento completado para {args.task} en área {args.area}")
 
