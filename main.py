@@ -3,28 +3,39 @@
 Backend unificado para el sistema de IA de monitore        # Determinar la ruta base del proyecto de forma más robusta
         current_dir = Path.cwd()
         
-        # Buscar el directorio datasets en múltiples ubicaciones posibles
-        possible_dataset_dirs = [
-            current_dir / "datasets",  # Desde backend/ (caso local)
-            current_dir.parent / "datasets",  # Desde backend/ hacia arriba (caso contenedor)
-            Path("/workspace") / "datasets",  # Ruta absoluta en contenedor
-            Path("/workspace/backendnasa") / "datasets",  # Ruta alternativa en contenedor
-        ]
+        # Verificar si estamos en un contenedor Docker
+        in_docker = Path("/workspace").exists()
         
-        dataset_dir = None
-        for possible_dir in possible_dataset_dirs:
-            if possible_dir.exists():
-                dataset_dir = possible_dir
-                print(f"Usando directorio de datasets: {dataset_dir}")
-                break
-        
-        if dataset_dir is None:
-            # Listar directorios disponibles para debug
-            print("Directorios disponibles:")
+        if in_docker:
+            # En contenedor Docker, usar rutas absolutas
+            dataset_dir = Path("/workspace/backendnasa") / "datasets"
+            print(f"Ejecutando en contenedor Docker, usando: {dataset_dir}")
+        else:
+            # En entorno local, buscar en múltiples ubicaciones
+            possible_dataset_dirs = [
+                current_dir / "datasets",  # Desde backend/
+                current_dir.parent / "datasets",  # Desde backend/ hacia arriba
+            ]
+            
+            dataset_dir = None
             for possible_dir in possible_dataset_dirs:
-                exists = "EXISTS" if possible_dir.exists() else "NOT FOUND"
-                print(f"  {possible_dir}: {exists}")
-            raise FileNotFoundError("No se encontró el directorio 'datasets' en ninguna ubicación esperada")e entrada principal que coordina todos los componentes.
+                if possible_dir.exists():
+                    dataset_dir = possible_dir
+                    print(f"Usando directorio de datasets: {dataset_dir}")
+                    break
+            
+            if dataset_dir is None:
+                raise FileNotFoundError(f"No se encontró el directorio 'datasets' en {possible_dataset_dirs}")
+        
+        # Verificar que el archivo específico existe
+        h5_file_path = dataset_dir / f"{args.area}_synthetic_regresion.h5"
+        if not h5_file_path.exists():
+            print(f"Archivo no encontrado: {h5_file_path}")
+            print(f"Archivos disponibles en {dataset_dir}:")
+            if dataset_dir.exists():
+                for file in dataset_dir.glob("*.h5"):
+                    print(f"  - {file.name}")
+            raise FileNotFoundError(f"Archivo de datos no encontrado: {h5_file_path}")e entrada principal que coordina todos los componentes.
 """
 
 import os
