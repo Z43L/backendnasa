@@ -128,7 +128,7 @@ def run_model_training(args):
         logger.error(f"Error en entrenamiento: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        sys.exit(1)
+        raise SystemExit(1)
 
 def run_weather_prediction(args):
     """Ejecutar servidor de predicción meteorológica."""
