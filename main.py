@@ -222,8 +222,9 @@ def main():
     train_parser.add_argument('--task', choices=['classification', 'regression'], default='classification')
     train_parser.add_argument('--area', default='falla_anatolia')
     train_parser.add_argument('--epochs', type=int, default=50)
-    train_parser.add_argument('--batch-size', type=int, default=8)
+    train_parser.add_argument('--batch-size', type=int, default=2)  # Reducido de 8 a 2 para evitar OOM
     train_parser.add_argument('--chunk-size', type=int, default=1000)
+    train_parser.add_argument('--use-cpu', action='store_true', help='Forzar uso de CPU en lugar de GPU')
     train_parser.set_defaults(func=run_model_training)
 
     # Comando para inferencia sísmica
