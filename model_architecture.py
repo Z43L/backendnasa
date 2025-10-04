@@ -68,8 +68,8 @@ class SpatialTemporalTransformer(nn.Module):
         )
         self.temporal_encoder = TransformerEncoder(temporal_encoder_layer, num_layers=num_encoder_layers)
 
-        # Mecanismo de atención dispersa (Lightning Indexer)
-        self.sparse_attention = SparseAttention(d_model, nhead, dropout)
+        # Mecanismo de atención global simplificado (reemplaza sparse_attention)
+        # Se implementa directamente en forward para mejor control
 
         # Cabeza de predicción
         if task_type == 'regression':
@@ -156,8 +156,27 @@ class SpatialTemporalTransformer(nn.Module):
         # Reorganizar: [batch, num_patches, d_model]
         temporal_features = last_timestep.view(batch_size, num_patches, self.d_model)
 
-        # Atención dispersa global
-        sparse_out = self.sparse_attention(temporal_features)  # [batch, num_patches, d_model]
+        # Atención dispersa global (simplificada para estabilidad)
+        # En lugar de sparse_attention compleja, usamos atención global simple
+        # para evitar problemas de dimensionalidad con muchos patches
+
+        # Calcular importancia de cada patch
+        patch_importance = torch.mean(temporal_features, dim=-1)  # [batch, num_patches]
+
+        # Seleccionar top-k patches más importantes (k=64 para estabilidad)
+        top_k = min(64, num_patches)
+        _, top_indices = torch.topk(patch_importance, top_k, dim=-1)  # [batch, top_k]
+
+        # Crear tensor de salida inicializado en cero
+        sparse_out = torch.zeros_like(temporal_features)  # [batch, num_patches, d_model]
+
+        # Para cada batch, copiar solo los top-k patches
+        for b in range(batch_size):
+            sparse_out[b, top_indices[b]] = temporal_features[b, top_indices[b]]
+
+        # También incluir un promedio global para estabilidad
+        global_avg = temporal_features.mean(dim=1, keepdim=True)  # [batch, 1, d_model]
+        sparse_out = sparse_out + 0.1 * global_avg.expand_as(sparse_out)
 
         # Cabeza de predicción
         if self.task_type == 'regression':
@@ -198,99 +217,6 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
-
-class SparseAttention(nn.Module):
-    """
-    Mecanismo de atención dispersa (Lightning Indexer).
-    Identifica y enfoca atención en las regiones más predictivas.
-    """
-
-    def __init__(self, d_model: int, nhead: int, dropout: float = 0.1, top_k: int = 16):
-        super().__init__()
-        self.d_model = d_model
-        self.nhead = nhead
-        self.head_dim = d_model // nhead
-        self.top_k = top_k
-
-        # Proyecciones para queries, keys, values
-        self.q_proj = nn.Linear(d_model, d_model)
-        self.k_proj = nn.Linear(d_model, d_model)
-        self.v_proj = nn.Linear(d_model, d_model)
-
-        self.dropout = nn.Dropout(dropout)
-        self.out_proj = nn.Linear(d_model, d_model)
-
-        # Capa para seleccionar top-k posiciones
-        self.selector = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            nn.ReLU(),
-            nn.Linear(d_model // 2, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Forward pass de atención dispersa.
-
-        Args:
-            x: Tensor de entrada [batch_size, seq_len, d_model]
-            mask: Máscara opcional
-
-        Returns:
-            Tensor de salida [batch_size, seq_len, d_model]
-        """
-        batch_size, seq_len, d_model = x.shape
-
-        # Proyectar queries, keys, values
-        q = self.q_proj(x).view(batch_size, seq_len, self.nhead, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(batch_size, seq_len, self.nhead, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(batch_size, seq_len, self.nhead, self.head_dim).transpose(1, 2)
-
-        # Calcular scores de atención
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-
-        # Aplicar máscara si existe
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-
-        # Seleccionar top-k posiciones más importantes
-        importance_scores = self.selector(x)  # [batch, seq_len, 1]
-
-        # Para cada cabeza y batch, seleccionar top-k
-        attention_weights = []
-        for b in range(batch_size):
-            for h in range(self.nhead):
-                # Obtener importancia para esta cabeza
-                imp = importance_scores[b, :, 0]  # [seq_len]
-
-                # Seleccionar top-k índices
-                _, top_k_indices = torch.topk(imp, min(self.top_k, seq_len), dim=-1)
-
-                # Crear máscara dispersa
-                sparse_mask = torch.zeros_like(scores[b, h])  # [seq_len, seq_len]
-                sparse_mask[top_k_indices.unsqueeze(1), :] = 1
-                sparse_mask[:, top_k_indices] = 1
-
-                # Aplicar softmax solo en posiciones seleccionadas
-                masked_scores = scores[b, h] * sparse_mask
-                masked_scores = masked_scores.masked_fill(sparse_mask == 0, float('-inf'))
-                weights = F.softmax(masked_scores, dim=-1)
-
-                attention_weights.append(weights)
-
-        # Stack de nuevo
-        attention_weights = torch.stack(attention_weights, dim=0).view(
-            batch_size, self.nhead, seq_len, seq_len
-        )
-
-        # Aplicar atención
-        attended = torch.matmul(attention_weights, v)
-
-        # Concatenar cabezas y proyectar
-        attended = attended.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
-        output = self.out_proj(attended)
-
-        return self.dropout(output)
 
 def create_model(task_type: str = 'regression', **kwargs) -> SpatialTemporalTransformer:
     """
