@@ -156,27 +156,17 @@ class SpatialTemporalTransformer(nn.Module):
         # Reorganizar: [batch, num_patches, d_model]
         temporal_features = last_timestep.view(batch_size, num_patches, self.d_model)
 
-        # Atención dispersa global (simplificada para estabilidad)
-        # En lugar de sparse_attention compleja, usamos atención global simple
-        # para evitar problemas de dimensionalidad con muchos patches
+        # Atención global simplificada: promedio ponderado de todos los patches
+        # Esto es más estable y eficiente que selección top-k compleja
 
-        # Calcular importancia de cada patch
-        patch_importance = torch.mean(temporal_features, dim=-1)  # [batch, num_patches]
+        # Calcular pesos de importancia para cada patch
+        patch_weights = torch.softmax(torch.mean(temporal_features, dim=-1), dim=-1)  # [batch, num_patches]
 
-        # Seleccionar top-k patches más importantes (k=64 para estabilidad)
-        top_k = min(64, num_patches)
-        _, top_indices = torch.topk(patch_importance, top_k, dim=-1)  # [batch, top_k]
+        # Atención global: promedio ponderado de todos los patches
+        sparse_out = torch.sum(temporal_features * patch_weights.unsqueeze(-1), dim=1, keepdim=True)  # [batch, 1, d_model]
 
-        # Crear tensor de salida inicializado en cero
-        sparse_out = torch.zeros_like(temporal_features)  # [batch, num_patches, d_model]
-
-        # Para cada batch, copiar solo los top-k patches
-        for b in range(batch_size):
-            sparse_out[b, top_indices[b]] = temporal_features[b, top_indices[b]]
-
-        # También incluir un promedio global para estabilidad
-        global_avg = temporal_features.mean(dim=1, keepdim=True)  # [batch, 1, d_model]
-        sparse_out = sparse_out + 0.1 * global_avg.expand_as(sparse_out)
+        # Expandir para mantener dimensionalidad consistente
+        sparse_out = sparse_out.expand(-1, num_patches, -1)  # [batch, num_patches, d_model]
 
         # Cabeza de predicción
         if self.task_type == 'regression':
