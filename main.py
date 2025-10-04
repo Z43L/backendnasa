@@ -40,7 +40,10 @@ def run_data_collection(args):
     """Ejecutar recolección de datos."""
     logger.info("Iniciando recolección de datos...")
     try:
-        from data_collection.asf_data_acquisition import main as asf_main
+        try:
+            from data_collection.asf_data_acquisition import main as asf_main
+        except ImportError:
+            from .data_collection.asf_data_acquisition import main as asf_main
         # Aquí se pueden agregar más fuentes de datos
         asf_main()
     except Exception as e:
@@ -51,7 +54,10 @@ def run_dataset_generation(args):
     """Ejecutar generación de datasets."""
     logger.info("Iniciando generación de datasets...")
     try:
-        from dataset_generation.generate_synthetic_data import main as gen_main
+        try:
+            from dataset_generation.generate_synthetic_data import main as gen_main
+        except ImportError:
+            from .dataset_generation.generate_synthetic_data import main as gen_main
         gen_main()
     except Exception as e:
         logger.error(f"Error en generación de datasets: {e}")
@@ -61,14 +67,36 @@ def run_model_training(args):
     """Ejecutar entrenamiento de modelos."""
     logger.info("Iniciando entrenamiento de modelos...")
     try:
-        from model_training.train_model import train_classification_model, train_regression_model
+        # Importar módulos de entrenamiento
+        try:
+            from model_training.train_model import train_classification_model, train_regression_model
+        except ImportError:
+            # Si no se encuentra, intentar importación relativa
+            from .model_training.train_model import train_classification_model, train_regression_model
 
+        # Determinar la ruta base del proyecto
+        current_dir = Path.cwd()
+        
+        # Buscar el directorio datasets en múltiples ubicaciones posibles
+        possible_dataset_dirs = [
+            current_dir / "datasets",  # Desde la raíz del proyecto
+            current_dir / "backend" / "datasets",  # Desde backend/
+            Path(__file__).parent.parent / "datasets",  # Relativo al archivo main.py
+        ]
+        
+        dataset_dir = None
+        for possible_dir in possible_dataset_dirs:
+            if possible_dir.exists():
+                dataset_dir = possible_dir
+                break
+        
+        if dataset_dir is None:
+            raise FileNotFoundError("No se encontró el directorio 'datasets' en ninguna ubicación esperada")
+        
         # Configurar archivo de datos basado en el área y tarea
-        # Las rutas son relativas al directorio raíz del proyecto
-        project_root = BASE_DIR.parent
         if args.task == 'classification':
-            h5_file = project_root / f"datasets/{args.area}_synthetic_clasificacion.h5"
-            save_dir = project_root / f"checkpoints_{args.task}_{args.area}"
+            h5_file = dataset_dir / f"{args.area}_synthetic_clasificacion.h5"
+            save_dir = current_dir / f"checkpoints_{args.task}_{args.area}"
             trainer = train_classification_model(
                 h5_file=str(h5_file),
                 save_dir=str(save_dir),
@@ -77,8 +105,8 @@ def run_model_training(args):
                 chunk_size=args.chunk_size
             )
         elif args.task == 'regression':
-            h5_file = project_root / f"datasets/{args.area}_synthetic_regresion.h5"
-            save_dir = project_root / f"checkpoints_{args.task}_{args.area}"
+            h5_file = dataset_dir / f"{args.area}_synthetic_regresion.h5"
+            save_dir = current_dir / f"checkpoints_{args.task}_{args.area}"
             trainer = train_regression_model(
                 h5_file=str(h5_file),
                 save_dir=str(save_dir),
