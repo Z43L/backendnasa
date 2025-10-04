@@ -67,12 +67,14 @@ def run_model_training(args):
     """Ejecutar entrenamiento de modelos."""
     logger.info("Iniciando entrenamiento de modelos...")
     try:
-        # Importar módulos de entrenamiento
+                # Importar módulos de entrenamiento
         try:
             from model_training.train_model import train_classification_model, train_regression_model
         except ImportError:
-            # Si no se encuentra, intentar importación relativa
-            from .model_training.train_model import train_classification_model, train_regression_model
+            # Si no se encuentra, intentar importación desde la raíz
+            import sys
+            sys.path.insert(0, str(BASE_DIR.parent))
+            from train_model import train_classification_model, train_regression_model
 
         # Determinar la ruta base del proyecto
         current_dir = Path.cwd()
@@ -93,6 +95,9 @@ def run_model_training(args):
         if dataset_dir is None:
             raise FileNotFoundError("No se encontró el directorio 'datasets' en ninguna ubicación esperada")
         
+        # Configurar dispositivo
+        device = 'cpu' if getattr(args, 'use_cpu', False) else 'auto'
+        
         # Configurar archivo de datos basado en el área y tarea
         if args.task == 'classification':
             h5_file = dataset_dir / f"{args.area}_synthetic_clasificacion.h5"
@@ -102,7 +107,8 @@ def run_model_training(args):
                 save_dir=str(save_dir),
                 num_epochs=args.epochs,
                 batch_size=args.batch_size,
-                chunk_size=args.chunk_size
+                chunk_size=args.chunk_size,
+                device=device
             )
         elif args.task == 'regression':
             h5_file = dataset_dir / f"{args.area}_synthetic_regresion.h5"
@@ -112,7 +118,8 @@ def run_model_training(args):
                 save_dir=str(save_dir),
                 num_epochs=args.epochs,
                 batch_size=args.batch_size,
-                chunk_size=args.chunk_size
+                chunk_size=args.chunk_size,
+                device=device
             )
 
         logger.info(f"Entrenamiento completado para {args.task} en área {args.area}")
