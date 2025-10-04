@@ -77,7 +77,7 @@ class SpatialTemporalTransformer(nn.Module):
             self.regression_head = nn.Sequential(
                 nn.Linear(d_model, d_model // 2),
                 nn.ReLU(),
-                nn.Linear(d_model // 2, self.num_patches)  # Salida: siguiente fotograma aplanado
+                nn.Linear(d_model // 2, 1)  # Un valor por patch
             )
         elif task_type == 'classification':
             # Para clasificación: estado de la falla
