@@ -61,19 +61,38 @@ def run_model_training(args):
     """Ejecutar entrenamiento de modelos."""
     logger.info("Iniciando entrenamiento de modelos...")
     try:
-        from model_training.train_model import main as train_main
-        # Pasar argumentos al entrenamiento
-        training_args = [
-            '--task', args.task,
-            '--area', args.area,
-            '--epochs', str(args.epochs),
-            '--batch_size', str(args.batch_size),
-            '--chunk_size', str(args.chunk_size)
-        ]
-        sys.argv = ['train_model.py'] + training_args
-        train_main()
+        from model_training.train_model import train_classification_model, train_regression_model
+
+        # Configurar archivo de datos basado en el área y tarea
+        # Las rutas son relativas al directorio raíz del proyecto
+        project_root = BASE_DIR.parent
+        if args.task == 'classification':
+            h5_file = project_root / f"datasets/{args.area}_synthetic_clasificacion.h5"
+            save_dir = project_root / f"checkpoints_{args.task}_{args.area}"
+            trainer = train_classification_model(
+                h5_file=str(h5_file),
+                save_dir=str(save_dir),
+                num_epochs=args.epochs,
+                batch_size=args.batch_size,
+                chunk_size=args.chunk_size
+            )
+        elif args.task == 'regression':
+            h5_file = project_root / f"datasets/{args.area}_synthetic_regresion.h5"
+            save_dir = project_root / f"checkpoints_{args.task}_{args.area}"
+            trainer = train_regression_model(
+                h5_file=str(h5_file),
+                save_dir=str(save_dir),
+                num_epochs=args.epochs,
+                batch_size=args.batch_size,
+                chunk_size=args.chunk_size
+            )
+
+        logger.info(f"Entrenamiento completado para {args.task} en área {args.area}")
+
     except Exception as e:
         logger.error(f"Error en entrenamiento: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 def run_weather_prediction(args):

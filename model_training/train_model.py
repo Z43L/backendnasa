@@ -40,15 +40,19 @@ class DeformationDataset(Dataset):
         self.transform = transform
         self.chunk_size = chunk_size
 
+        # Determinar qué dataset usar basado en el tipo de tarea
+        self.seq_dataset = 'secuencias' if task_type == 'classification' else 'secuencias_entrada'
+        self.label_dataset = 'etiquetas' if task_type == 'classification' else 'secuencias_objetivo'
+
         # Abrir archivo HDF5 y obtener metadatos (sin cargar datos)
         with h5py.File(h5_file, 'r') as f:
             grupo_principal = list(f.keys())[0]  # 'clasificacion' o 'regresion'
             grupo = f[grupo_principal]
 
             # Obtener forma de las secuencias sin cargarlas
-            self.num_samples = grupo['secuencias'].shape[0]
-            self.seq_length = grupo['secuencias'].shape[1]
-            self.grid_size = (grupo['secuencias'].shape[2], grupo['secuencias'].shape[3])
+            self.num_samples = grupo[self.seq_dataset].shape[0]
+            self.seq_length = grupo[self.seq_dataset].shape[1]
+            self.grid_size = (grupo[self.seq_dataset].shape[2], grupo[self.seq_dataset].shape[3])
 
             # Cargar etiquetas en memoria (son pequeñas)
             if task_type == 'classification':
@@ -56,17 +60,12 @@ class DeformationDataset(Dataset):
                 self.classes = json.loads(grupo.attrs['clases'])
                 self.class_to_idx = json.loads(grupo.attrs['clase_a_indice'])
             elif task_type == 'regression':
-                if 'regresion' in f:
-                    reg_grupo = f['regresion']
-                    labels_raw = reg_grupo['secuencias_objetivo'][:]  # [num_samples, seq_length, height, width] o [num_samples, height, width]
-                    if len(labels_raw.shape) == 4:  # Si es secuencia completa, tomar el último fotograma
-                        self.labels = labels_raw[:, -1]  # [num_samples, height, width]
-                    else:
-                        self.labels = labels_raw  # [num_samples, height, width]
+                # Para regresión, las etiquetas son las secuencias_objetivo
+                labels_raw = grupo['secuencias_objetivo'][:]  # [num_samples, 1, height, width]
+                if len(labels_raw.shape) == 4:  # Si es secuencia completa, tomar el último fotograma
+                    self.labels = labels_raw[:, -1]  # [num_samples, height, width]
                 else:
-                    # Fallback: usar el último fotograma de cada secuencia
-                    # Para esto necesitamos cargar parcialmente
-                    self.labels = None  # Se cargará on-demand
+                    self.labels = labels_raw  # [num_samples, height, width]
 
         # Convertir etiquetas a tensores de PyTorch
         if hasattr(self, 'labels') and self.labels is not None:
@@ -90,7 +89,7 @@ class DeformationDataset(Dataset):
         with h5py.File(self.h5_file, 'r') as f:
             grupo_principal = list(f.keys())[0]
             grupo = f[grupo_principal]
-            sequences_chunk = grupo['secuencias'][start_idx:end_idx]  # [chunk_size, seq_length, height, width]
+            sequences_chunk = grupo[self.seq_dataset][start_idx:end_idx]  # [chunk_size, seq_length, height, width]
 
         # Convertir a tensor y cachear
         sequences_tensor = torch.from_numpy(sequences_chunk).float()
@@ -116,7 +115,7 @@ class DeformationDataset(Dataset):
             grupo_principal = list(f.keys())[0]
             grupo = f[grupo_principal]
             # Para regresión, usar el último fotograma como etiqueta
-            labels_chunk = grupo['secuencias'][start_idx:end_idx, -1]  # [chunk_size, height, width]
+            labels_chunk = grupo[self.label_dataset][start_idx:end_idx]  # [chunk_size, height, width]
 
         labels_tensor = torch.from_numpy(labels_chunk).float()
 
